@@ -4,6 +4,8 @@
 [product]
 # 产品描述信息
 description = "这是产品A的描述"
+# 图片目录（相对于产品目录）
+image_dir = "images"
 
 [default]
 # 产品特定的提示词（可选）

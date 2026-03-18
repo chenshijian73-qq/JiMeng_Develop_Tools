@@ -17,8 +17,8 @@ import sys
 import json
 import time
 import glob
+import base64
 import asyncio
-import aiohttp
 import argparse
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -26,6 +26,12 @@ from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 
 import tomli
+# 导入火山引擎SDK
+try:
+    from volcengine.visual.VisualService import VisualService
+except ImportError:
+    print("错误: 未找到火山引擎SDK，请先安装依赖: pip install volcengine")
+    sys.exit(1)
 
 
 # ==================== 配置类 ====================
@@ -74,136 +80,41 @@ class VideoResult:
 
 # ==================== API客户端 ====================
 
-class JimengVideoClient:
-    """即梦AI视频生成API客户端"""
+class JimengSDKClient:
+    """即梦AI视频生成API客户端 (基于火山引擎SDK)"""
     
-    BASE_URL = "https://visual.volcengineapi.com"
-    SUBMIT_ACTION = "CVSync2AsyncSubmitTask"
-    QUERY_ACTION = "CVSync2AsyncGetResult"
-    VERSION = "2022-08-31"
-    
-    def __init__(self, ak: str, sk: str, quality: str = "720p"):
-        self.ak = ak
-        self.sk = sk
-        self.quality = quality
-        self.region = "cn-north-1"
-        self.service = "cv"
-    
-    def _generate_signature(self, method: str, action: str, body: str = "") -> Dict[str, str]:
-        """生成火山引擎API签名（简化版）"""
-        import hashlib
-        import hmac
-        import base64
-        from datetime import datetime
-        
-        # 这里使用简化的签名方式，实际生产环境请参考火山引擎官方签名算法
-        timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-        date = timestamp[:8]
-        
-        # 简化签名（实际需要完整的签名算法）
-        headers = {
-            "Content-Type": "application/json",
-            "X-Date": timestamp,
-            "X-Region": self.region,
-            "X-Service": self.service,
-        }
-        
-        return headers
-    
-    async def submit_task(
-        self, 
-        session: aiohttp.ClientSession,
-        image_url: str, 
-        prompt: str, 
-        frames: int = 121,
-        req_key: str = "jimeng_i2v_first_v30"
-    ) -> Dict[str, Any]:
-        """提交视频生成任务"""
-        url = f"{self.BASE_URL}?Action={self.SUBMIT_ACTION}&Version={self.VERSION}"
-        
-        payload = {
-            "req_key": req_key,
-            "image_urls": [image_url],
-            "prompt": prompt,
-            "frames": frames
-        }
-        
-        headers = self._generate_signature("POST", self.SUBMIT_ACTION)
-        headers["Content-Type"] = "application/json"
-        
-        # 添加鉴权信息
-        headers["X-AK"] = self.ak
-        headers["X-SK"] = self.sk
-        
-        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            return await resp.json()
-    
-    async def query_task(
-        self, 
-        session: aiohttp.ClientSession,
-        task_id: str,
-        req_key: str = "jimeng_i2v_first_v30"
-    ) -> Dict[str, Any]:
-        """查询任务状态"""
-        url = f"{self.BASE_URL}?Action={self.QUERY_ACTION}&Version={self.VERSION}"
-        
-        payload = {
-            "req_key": req_key,
-            "task_id": task_id
-        }
-        
-        headers = self._generate_signature("POST", self.QUERY_ACTION)
-        headers["Content-Type"] = "application/json"
-        headers["X-AK"] = self.ak
-        headers["X-SK"] = self.sk
-        
-        async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            return await resp.json()
-
-
-class JimengVideoClientSync:
-    """同步版本的即梦AI视频生成API客户端（使用requests）"""
-    
-    BASE_URL = "https://visual.volcengineapi.com"
-    SUBMIT_ACTION = "CVSync2AsyncSubmitTask"
-    QUERY_ACTION = "CVSync2AsyncGetResult"
-    VERSION = "2022-08-31"
-    
-    def __init__(self, ak: str, sk: str, quality: str = "720p"):
-        self.ak = ak
-        self.sk = sk
-        self.quality = quality
-        self.region = "cn-north-1"
-        self.service = "cv"
+    def __init__(self, ak: str, sk: str):
+        self.service = VisualService()
+        self.service.set_ak(ak)
+        self.service.set_sk(sk)
+        # self.service.set_region("cn-north-1") # SDK默认可能就是这个，或者不需要设置
     
     def submit_task(
         self, 
-        image_url: str, 
+        image_path: str, 
         prompt: str, 
         frames: int = 121,
         req_key: str = "jimeng_i2v_first_v30"
     ) -> Dict[str, Any]:
         """提交视频生成任务"""
-        import requests
-        
-        url = f"{self.BASE_URL}?Action={self.SUBMIT_ACTION}&Version={self.VERSION}"
-        
-        payload = {
+        # 读取图片并转换为Base64
+        try:
+            with open(image_path, "rb") as f:
+                image_data = f.read()
+                base64_str = base64.b64encode(image_data).decode("utf-8")
+        except Exception as e:
+            return {"code": -1, "message": f"读取图片失败: {str(e)}"}
+
+        form = {
             "req_key": req_key,
-            "image_urls": [image_url],
+            "binary_data_base64": [base64_str],
             "prompt": prompt,
             "frames": frames
         }
         
-        headers = {
-            "Content-Type": "application/json",
-            "X-AK": self.ak,
-            "X-SK": self.sk
-        }
-        
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=30)
-            return resp.json()
+            # SDK调用
+            return self.service.cv_sync2async_submit_task(form)
         except Exception as e:
             return {"code": -1, "message": str(e)}
     
@@ -213,24 +124,14 @@ class JimengVideoClientSync:
         req_key: str = "jimeng_i2v_first_v30"
     ) -> Dict[str, Any]:
         """查询任务状态"""
-        import requests
-        
-        url = f"{self.BASE_URL}?Action={self.QUERY_ACTION}&Version={self.VERSION}"
-        
-        payload = {
+        form = {
             "req_key": req_key,
             "task_id": task_id
         }
         
-        headers = {
-            "Content-Type": "application/json",
-            "X-AK": self.ak,
-            "X-SK": self.sk
-        }
-        
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=30)
-            return resp.json()
+            # SDK调用
+            return self.service.cv_sync2async_get_result(form)
         except Exception as e:
             return {"code": -1, "message": str(e)}
 
@@ -312,97 +213,105 @@ def get_product_directories(base_dir: str) -> List[str]:
 def get_images_in_directory(dir_path: str) -> List[str]:
     """获取目录中的所有图片文件"""
     image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.webp']
-    images = []
+    images = set()  # 使用集合去重
     
     for ext in image_extensions:
-        images.extend(glob.glob(os.path.join(dir_path, f"*{ext}")))
-        images.extend(glob.glob(os.path.join(dir_path, f"*{ext.upper()}")))
+        # 查找小写扩展名
+        found = glob.glob(os.path.join(dir_path, f"*{ext}"))
+        for f in found:
+            images.add(os.path.abspath(f))
+            
+        # 查找大写扩展名
+        found_upper = glob.glob(os.path.join(dir_path, f"*{ext.upper()}"))
+        for f in found_upper:
+            images.add(os.path.abspath(f))
     
-    return sorted(images)
+    return sorted(list(images))
 
 
 # ==================== 视频生成 ====================
 
-def create_image_url(image_path: str, base_url: str = "") -> str:
-    """创建图片URL（这里需要根据实际部署情况配置）"""
-    # 如果有HTTP服务，可以返回实际的URL
-    # 这里暂时返回本地路径，生产环境需要配置图片服务器
-    if base_url:
-        filename = os.path.basename(image_path)
-        return f"{base_url}/{filename}"
-    
-    # 简化处理：假设使用本地文件路径
-    return f"file://{os.path.abspath(image_path)}"
-
-
 async def process_single_task(
-    client: JimengVideoClient,
+    client: JimengSDKClient,
     task: VideoTask,
     semaphore: asyncio.Semaphore
 ) -> VideoResult:
-    """处理单个视频生成任务"""
+    """处理单个视频生成任务 (使用SDK)"""
     async with semaphore:
-        print(f"[{task.product_name}] 提交任务: {os.path.basename(task.image_path)}")
+        img_name = os.path.basename(task.image_path)
+        print(f"[{task.product_name}] [{img_name}] 开始处理...")
         
         try:
-            # 提交任务
-            async with aiohttp.ClientSession() as session:
-                submit_result = await client.submit_task(
-                    session=session,
-                    image_url=task.image_path,
-                    prompt=task.prompt,
-                    frames=task.frames,
-                    req_key=task.req_key
-                )
+            # 提交任务 (在线程池中运行同步SDK方法)
+            print(f"[{task.product_name}] [{img_name}] 正在提交任务...")
+            submit_result = await asyncio.to_thread(
+                client.submit_task,
+                image_path=task.image_path,
+                prompt=task.prompt,
+                frames=task.frames,
+                req_key=task.req_key
+            )
             
             if submit_result.get("code") != 10000:
+                error_msg = submit_result.get("message", "提交失败")
+                print(f"[{task.product_name}] [{img_name}] 提交失败详细信息: {json.dumps(submit_result, ensure_ascii=False)}")
                 return VideoResult(
                     task=task,
                     success=False,
-                    error=submit_result.get("message", "提交失败")
+                    error=error_msg
                 )
             
             task_id = submit_result.get("data", {}).get("task_id")
-            print(f"[{task.product_name}] 任务已提交, task_id: {task_id}")
+            print(f"[{task.product_name}] [{img_name}] 任务已提交成功, task_id: {task_id}")
             
             # 轮询查询任务状态
             max_retries = 60  # 最多等待60次
             retry_interval = 3  # 每3秒查询一次
             
+            print(f"[{task.product_name}] [{img_name}] 开始轮询任务状态...")
+            
             for i in range(max_retries):
                 await asyncio.sleep(retry_interval)
                 
-                async with aiohttp.ClientSession() as session:
-                    query_result = await client.query_task(
-                        session=session,
-                        task_id=task_id,
-                        req_key=task.req_key
-                    )
+                # 查询任务 (在线程池中运行同步SDK方法)
+                query_result = await asyncio.to_thread(
+                    client.query_task,
+                    task_id=task_id,
+                    req_key=task.req_key
+                )
                 
                 if query_result.get("code") != 10000:
+                    print(f"[{task.product_name}] [{img_name}] 查询状态失败: {query_result.get('message')}")
                     continue
                 
                 status = query_result.get("data", {}).get("status")
                 
                 if status == "done":
                     video_url = query_result.get("data", {}).get("video_url")
-                    print(f"[{task.product_name}] 视频生成完成: {video_url}")
+                    print(f"[{task.product_name}] [{img_name}] 视频生成完成! URL: {video_url}")
                     return VideoResult(
                         task=task,
                         success=True,
                         task_id=task_id,
                         video_url=video_url
                     )
-                elif status in ["not_found", "expired"]:
+                elif status in ["not_found", "expired", "failed"]:
+                    error_msg = f"任务结束状态异常: {status}"
+                    if status == "failed":
+                        fail_reason = query_result.get("data", {}).get("fail_reason", "未知原因")
+                        error_msg = f"任务执行失败: {fail_reason}"
+                    
+                    print(f"[{task.product_name}] [{img_name}] {error_msg}")
                     return VideoResult(
                         task=task,
                         success=False,
                         task_id=task_id,
-                        error=f"任务状态: {status}"
+                        error=error_msg
                     )
                 else:
-                    print(f"[{task.product_name}] 任务处理中... ({i+1}/{max_retries})")
+                    print(f"[{task.product_name}] [{img_name}] 任务处理中... ({i+1}/{max_retries})")
             
+            print(f"[{task.product_name}] [{img_name}] 任务等待超时")
             return VideoResult(
                 task=task,
                 success=False,
@@ -411,89 +320,12 @@ async def process_single_task(
             )
             
         except Exception as e:
+            print(f"[{task.product_name}] [{img_name}] 发生异常: {str(e)}")
             return VideoResult(
                 task=task,
                 success=False,
                 error=str(e)
             )
-
-
-def process_single_task_sync(
-    client: JimengVideoClientSync,
-    task: VideoTask,
-    max_wait_time: int = 180
-) -> VideoResult:
-    """同步版本：处理单个视频生成任务"""
-    print(f"[{task.product_name}] 提交任务: {os.path.basename(task.image_path)}")
-    
-    try:
-        # 提交任务
-        submit_result = client.submit_task(
-            image_url=task.image_path,
-            prompt=task.prompt,
-            frames=task.frames,
-            req_key=task.req_key
-        )
-        
-        if submit_result.get("code") != 10000:
-            return VideoResult(
-                task=task,
-                success=False,
-                error=submit_result.get("message", "提交失败")
-            )
-        
-        task_id = submit_result.get("data", {}).get("task_id")
-        print(f"[{task.product_name}] 任务已提交, task_id: {task_id}")
-        
-        # 轮询查询任务状态
-        start_time = time.time()
-        
-        while time.time() - start_time < max_wait_time:
-            time.sleep(3)
-            
-            query_result = client.query_task(
-                task_id=task_id,
-                req_key=task.req_key
-            )
-            
-            if query_result.get("code") != 10000:
-                continue
-            
-            status = query_result.get("data", {}).get("status")
-            
-            if status == "done":
-                video_url = query_result.get("data", {}).get("video_url")
-                print(f"[{task.product_name}] 视频生成完成: {video_url}")
-                return VideoResult(
-                    task=task,
-                    success=True,
-                    task_id=task_id,
-                    video_url=video_url
-                )
-            elif status in ["not_found", "expired"]:
-                return VideoResult(
-                    task=task,
-                    success=False,
-                    task_id=task_id,
-                    error=f"任务状态: {status}"
-                )
-            else:
-                elapsed = int(time.time() - start_time)
-                print(f"[{task.product_name}] 任务处理中... ({elapsed}s)")
-        
-        return VideoResult(
-            task=task,
-            success=False,
-            task_id=task_id,
-            error="等待超时"
-        )
-        
-    except Exception as e:
-        return VideoResult(
-            task=task,
-            success=False,
-            error=str(e)
-        )
 
 
 # ==================== 主程序 ====================
@@ -513,8 +345,11 @@ def generate_video_tasks(
         product_config = load_product_config(product_dir, global_config)
         config = merge_config(global_config, product_config)
         
-        # 确定图片目录
-        image_dir = product_config.image_dir if product_config.image_dir else product_dir
+        # 确定图片目录（image_dir相对于产品目录）
+        if product_config.image_dir:
+            image_dir = os.path.join(product_dir, product_config.image_dir)
+        else:
+            image_dir = product_dir
         
         # 获取图片列表
         images = get_images_in_directory(image_dir)
@@ -550,7 +385,7 @@ def generate_video_tasks(
 
 
 async def run_async(concurrency: int = 2):
-    """异步运行主程序"""
+    """运行主程序"""
     # 加载配置
     global_config = load_global_config()
     
@@ -563,8 +398,12 @@ async def run_async(concurrency: int = 2):
         print("例如: export JIMENG_AK=your_ak JIMENG_SK=your_sk")
         sys.exit(1)
     
-    # 创建客户端
-    client = JimengVideoClient(ak, sk, global_config.quality)
+    # 创建SDK客户端
+    try:
+        client = JimengSDKClient(ak, sk)
+    except Exception as e:
+        print(f"初始化SDK客户端失败: {e}")
+        return
     
     # 生成任务
     products_dir = global_config.image_dir
@@ -613,87 +452,19 @@ async def run_async(concurrency: int = 2):
     print(f"结果已保存到: {results_file}")
 
 
-def run_sync(concurrency: int = 2):
-    """同步运行主程序"""
-    # 加载配置
-    global_config = load_global_config()
-    
-    # 获取AK/SK
-    ak = os.environ.get("JIMENG_AK")
-    sk = os.environ.get("JIMENG_SK")
-    
-    if not ak or not sk:
-        print("错误: 请设置环境变量 JIMENG_AK 和 JIMENG_SK")
-        print("例如: export JIMENG_AK=your_ak JIMENG_SK=your_sk")
-        sys.exit(1)
-    
-    # 创建客户端
-    client = JimengVideoClientSync(ak, sk, global_config.quality)
-    
-    # 生成任务
-    products_dir = global_config.image_dir
-    tasks = generate_video_tasks(global_config, products_dir)
-    
-    if not tasks:
-        print("没有找到任何视频生成任务")
-        return
-    
-    print(f"共 {len(tasks)} 个任务，并发数: {concurrency}")
-    
-    # 使用线程池控制并发（同步版本）
-    with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        results = list(executor.map(
-            lambda task: process_single_task_sync(client, task),
-            tasks
-        ))
-    
-    # 输出结果统计
-    success_count = sum(1 for r in results if r.success)
-    fail_count = len(results) - success_count
-    
-    print("\n" + "=" * 50)
-    print(f"任务完成统计:")
-    print(f"  成功: {success_count}")
-    print(f"  失败: {fail_count}")
-    print("=" * 50)
-    
-    # 保存结果到文件
-    results_file = "video_generation_results.json"
-    results_data = []
-    for r in results:
-        results_data.append({
-            "product": r.task.product_name,
-            "image": os.path.basename(r.task.image_path),
-            "success": r.success,
-            "task_id": r.task_id,
-            "video_url": r.video_url,
-            "error": r.error
-        })
-    
-    with open(results_file, "w", encoding="utf-8") as f:
-        json.dump(results_data, f, ensure_ascii=False, indent=2)
-    
-    print(f"结果已保存到: {results_file}")
-
-
 def main():
     parser = argparse.ArgumentParser(description="即梦AI视频批量生成工具")
     parser.add_argument("-c", "--concurrency", type=int, default=2, 
                         help="并发数，默认2")
-    parser.add_argument("-s", "--sync", action="store_true",
-                        help="使用同步模式（默认异步）")
     parser.add_argument("--config", default="config.toml",
                         help="配置文件路径")
     
     args = parser.parse_args()
     
-    print("即梦AI视频批量生成工具")
+    print("即梦AI视频批量生成工具 (基于火山引擎SDK)")
     print("=" * 50)
     
-    if args.sync:
-        run_sync(args.concurrency)
-    else:
-        asyncio.run(run_async(args.concurrency))
+    asyncio.run(run_async(args.concurrency))
 
 
 if __name__ == "__main__":

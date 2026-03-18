@@ -34,8 +34,7 @@
 - Python 3.8+
 - 依赖包：
   - `tomli` - TOML配置文件解析
-  - `aiohttp` - 异步HTTP客户端
-  - `requests` - 同步HTTP客户端
+  - `volcengine` - 火山引擎SDK
 
 安装依赖：
 ```bash
@@ -85,7 +84,9 @@ frames = 241
 ## 使用方法
 
 ### 1. 设置环境变量
-> 获取密钥地址： https://console.volcengine.com/iam/keymanage
+> 资源包购买: https://www.volcengine.com/activity/jimeng
+> 服务 API 开通: https://console.volcengine.com/ai/ability/detail/2
+> 获取密钥地址: https://console.volcengine.com/iam/keymanage
 
 
 ```bash
@@ -105,11 +106,8 @@ export JIMENG_SK=your_secret_key
 ### 3. 运行程序
 
 ```bash
-# 异步模式（默认，最多2并发）
+# 默认运行（最多2并发）
 python jimeng_video_generator.py
-
-# 同步模式
-python jimeng_video_generator.py --sync
 
 # 指定并发数
 python jimeng_video_generator.py -c 2
@@ -124,7 +122,6 @@ python jimeng_video_generator.py -c 2
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `-c, --concurrency` | 并发数 | 2 |
-| `-s, --sync` | 使用同步模式 | 异步 |
 | `--config` | 配置文件路径 | config.toml |
 
 ## API说明
