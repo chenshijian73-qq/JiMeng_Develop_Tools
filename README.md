@@ -85,7 +85,9 @@ frames = 241
 
 ### 1. 设置环境变量
 > 资源包购买: https://www.volcengine.com/activity/jimeng
+
 > 服务 API 开通: https://console.volcengine.com/ai/ability/detail/2
+
 > 获取密钥地址: https://console.volcengine.com/iam/keymanage
 
 
