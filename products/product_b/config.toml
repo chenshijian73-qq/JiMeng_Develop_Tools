@@ -1,0 +1,9 @@
+# 产品B配置文件
+
+[product]
+description = "这是产品B的描述"
+# 产品独立的图片目录
+image_dir = "images"
+
+[default]
+prompt = "产品B动态展示"
